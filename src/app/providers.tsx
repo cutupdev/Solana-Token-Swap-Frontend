@@ -14,10 +14,12 @@ export default function Providers({ children }: { children: ReactNode }) {
   const [swapTokenList, setSwapTokenList] = useState<any>([]);
   const [currentAmount, setCurrentAmount] = useState<number>(1000)
   const [loadingState, setLoadingState] = useState<boolean>(false);
+  const [textLoadingState, setTextLoadingState] = useState<boolean>(false);
+  const [loadingText, setLoadingText] = useState<string>("")
 
   return (
     <SolanaWalletProvider>
-      <UserContext.Provider value={{ tokenList, setTokenList, loadingState, setLoadingState, tokenFilterList, setTokenFilterList, selectedTokenList, setSelectedTokenList, currentAmount, setCurrentAmount, swapTokenList, setSwapTokenList }}>
+      <UserContext.Provider value={{ tokenList, setTokenList, loadingState, setLoadingState, tokenFilterList, setTokenFilterList, selectedTokenList, setSelectedTokenList, currentAmount, setCurrentAmount, swapTokenList, setSwapTokenList, textLoadingState, setTextLoadingState, loadingText, setLoadingText }}>
         <QueryClientProvider client={queryClient}>
           <PageProvider>{children}</PageProvider>
         </QueryClientProvider>

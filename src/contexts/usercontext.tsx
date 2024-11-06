@@ -14,6 +14,10 @@ const UserContext = createContext({
   setLoadingState: (value: boolean) => { },
   swapTokenList: [],
   setSwapTokenList: (value: any) => { },
+  textLoadingState: false,
+  setTextLoadingState: (value: boolean) => { },
+  loadingText: "",
+  setLoadingText: (value: string) => { },
 })
 
 export default UserContext

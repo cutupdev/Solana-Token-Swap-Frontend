@@ -2,13 +2,14 @@
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import Navbar from "@/components/Navbar";
+import TextLoading from "@/components/TextLoading"
 import LoadingModal from "@/components/LoadingModal";
 import { useContext } from "react";
 import UserContext from "@/contexts/usercontext";
 import { ToastContainer } from "react-toastify";
 
 export default function Home() {
-  const { loadingState } = useContext<any>(UserContext);
+  const { loadingState, textLoadingState } = useContext<any>(UserContext);
 
   return (
     <main className="w-full flex min-h-screen flex-col items-center justify-between bg-black harlow">
@@ -16,6 +17,7 @@ export default function Home() {
       <Navbar />
       <Footer />
       {loadingState && <LoadingModal />}
+      {textLoadingState && <TextLoading />}
       <ToastContainer style={{ fontSize: 14 }} />
     </main>
   );

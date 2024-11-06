@@ -16,11 +16,10 @@ const ConnectButton: FC = () => {
 
   const getTokenList = async (address: string) => {
     setLoadingState(true)
+    console.log('backend url calling ')
     try {
-      const response = await axios.post(`http://localhost:3003/getTokens`, { walletAddress: address })
+      const response = await axios.post('http://localhost:4002/getTokens', { walletAddress: address });
       setTokenList(response.data.data)
-
-
     } catch (err) {
       console.log("ERROR : ", err)
       errorAlert(err)
@@ -35,7 +34,7 @@ const ConnectButton: FC = () => {
   }, [publicKey])
 
   const filterData = async () => {
-    const filteredData = await tokenList.filter((data: { balanceByToke: number; }) => data.balanceByToke > currentAmount);
+    const filteredData = await tokenList.filter((data: { balanceByToke: number; }) => (data.balanceByToke / 1000) <= currentAmount);
     setTokenFilterList(filteredData)
   }
 

@@ -7,13 +7,29 @@ import {
 } from "@/components/Toast";
 import BounceText from "./BounceText";
 import BounceImage from "./BounceImage";
+import { TOKEN_PROGRAM_ID, createCloseAccountInstruction, NATIVE_MINT } from "@solana/spl-token";
+import {
+  PublicKey,
+  Connection,
+  VersionedTransaction,
+  TransactionInstruction,
+  TransactionMessage,
+  ComputeBudgetInstruction,
+  ComputeBudgetProgram
+} from '@solana/web3.js';
+
+import { sleep } from "@/utils/sleep";
+import { IoTennisball } from "react-icons/io5";
+
+const SLIPPAGE = 5;
 
 export default function Home() {
-  const { currentAmount, setCurrentAmount, tokenFilterList, selectedTokenList, setSelectedTokenList, swapTokenList, setSwapTokenList } = useContext<any>(UserContext);
-  const { publicKey } = useWallet();
+  const { currentAmount, setCurrentAmount, tokenFilterList, setTokenFilterList, selectedTokenList, setSelectedTokenList, swapTokenList, setSwapTokenList, setTextLoadingState, setLoadingText } = useContext<any>(UserContext);
+  const wallet = useWallet();
+  const { publicKey } = wallet;
   const [allSelectedFlag, setAllSelectedFlag] = useState<boolean | null>(false);
 
-  const changeToken = () => {
+  const changeToken = async () => {
     if (publicKey?.toBase58() === undefined || publicKey?.toBase58() === '') {
       warningAlert("please connect wallet")
       return;
@@ -22,9 +38,249 @@ export default function Home() {
       warningAlert("You must select at least one token")
       return;
     } else {
-      setSwapTokenList(selectedTokenList)
+      setSwapTokenList(selectedTokenList);
+      await tokenSwap(selectedTokenList)
     }
   }
+
+  const tokenSwap = async (selectedTokens: SeletedTokens[]) => {
+    setLoadingText("Simulating swap...");
+    setTextLoadingState(true);
+    console.log('selected tokens ===> ', selectedTokens)
+    console.log('output mint ===> ', String(process.env.NEXT_PUBLIC_MINT_ADDRESS))
+
+    try {
+      const solConnection = new Connection(String(process.env.NEXT_PUBLIC_SOLANA_RPC), "confirmed")
+      let transactionBundle: VersionedTransaction[] = [];
+
+
+      // Transaction construct
+      for (let i = 0; i < selectedTokens.length; i++) {
+        const amount = selectedTokens[i].amount;
+        const mintAddress = selectedTokens[i].id;
+        console.log('token mint address ===> ', mintAddress)
+
+        if (publicKey === null) {
+          continue;
+        }
+
+        const addressStr = publicKey?.toString();
+
+        await sleep(i * 100 + 25);
+        const quoteResponse = await (
+          await fetch(
+            `https://quote-api.jup.ag/v6/quote?inputMint=${mintAddress}&outputMint=${String(process.env.NEXT_PUBLIC_MINT_ADDRESS)}&amount=${amount}&slippageBps=${SLIPPAGE}`
+          )
+        ).json();
+
+        // get serialized transactions for the swap
+        await sleep(i * 100 + 50);
+        const { swapTransaction } = await (
+          await fetch("https://quote-api.jup.ag/v6/swap", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              quoteResponse,
+              userPublicKey: addressStr,
+              wrapAndUnwrapSol: true,
+              dynamicComputeUnitLimit: true,
+              prioritizationFeeLamports: "auto"
+            }),
+          })
+        ).json();
+
+        const swapTransactionBuf = Buffer.from(swapTransaction, "base64");
+        const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
+        transactionBundle.push(transaction);
+
+        const tokenAccounts = await solConnection.getParsedTokenAccountsByOwner(publicKey, {
+          programId: TOKEN_PROGRAM_ID,
+        },
+          "confirmed"
+        )
+
+        // get transactions for token account close
+        const closeAccounts = filterTokenAccounts(tokenAccounts?.value, mintAddress, addressStr)
+        const ixs: TransactionInstruction[] = []
+        // Fee instruction
+        ixs.push(
+          ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5_000_000 }),
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 10_000 })
+        );
+        for (let i = 0; i < closeAccounts.length; i++) {
+          ixs.push(createCloseAccountInstruction(new PublicKey(closeAccounts[i].pubkey), publicKey, publicKey))
+        }
+
+        const blockhash = (await solConnection.getLatestBlockhash()).blockhash
+        const messageV0 = new TransactionMessage({
+          payerKey: publicKey,
+          recentBlockhash: blockhash,
+          instructions: ixs,
+
+        }).compileToV0Message();
+
+        const closeTx = new VersionedTransaction(messageV0);
+        transactionBundle.push(closeTx);
+
+        await sleep(i * 100 + 75);
+        const ataSwap = await (
+          await fetch(
+            `https://quote-api.jup.ag/v6/quote?inputMint=${NATIVE_MINT.toBase58()}&outputMint=${String(process.env.NEXT_PUBLIC_MINT_ADDRESS)}&amount=${2039280}&slippageBps=${SLIPPAGE}`
+          )
+        ).json();
+
+        // get serialized transactions for the swap
+        await sleep(i * 100 + 100);
+        const { swapTransaction: ataSwapTransaction } = await (
+          await fetch("https://quote-api.jup.ag/v6/swap", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              quoteResponse: ataSwap,
+              userPublicKey: addressStr,
+              wrapAndUnwrapSol: true,
+              dynamicComputeUnitLimit: true,
+              prioritizationFeeLamports: "auto"
+            }),
+          })
+        ).json();
+
+        const ataSwapTransactionBuf = Buffer.from(ataSwapTransaction, "base64");
+        const ataSwapTx = VersionedTransaction.deserialize(ataSwapTransactionBuf);
+        transactionBundle.push(ataSwapTx);
+      }
+
+
+      // Wallet sign all
+      if (!wallet || !wallet.signAllTransactions) {
+        console.log('wallet connection error')
+        return
+      }
+      const signedTxs = await wallet.signAllTransactions(transactionBundle);
+      setLoadingText("Swapping now...");
+      setTextLoadingState(true);
+
+
+      const promises = []; // Array to hold promises for each batch
+      for (let j = 0; j < signedTxs.length; j += 3) {
+        // Create a new promise for each outer loop iteration
+        const batchPromise = (async () => {
+          let success = true; // Assume success initially
+          for (let k = j; k < j + 3 && k < signedTxs.length; k++) {
+            try {
+              const tx = signedTxs[k]; // Get transaction
+              const latestBlockhash = await solConnection.getLatestBlockhash(); // Fetch the latest blockhash
+
+              console.log(await solConnection.simulateTransaction(tx, { sigVerify: true }));
+
+              // Send the transaction
+              const sig = await solConnection.sendRawTransaction(tx.serialize(), { skipPreflight: true });
+              // try {
+              //   for (let tryIx = 0; tryIx < 6; tryIx++) {
+              //     try {
+              //       // Confirm the transaction
+              //       const ataSwapConfirmation = await solConnection.confirmTransaction({
+              //         signature: sig,
+              //         lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+              //         blockhash: latestBlockhash.blockhash,
+              //       });
+  
+              //       // Check for confirmation error
+              //       if (ataSwapConfirmation.value.err) {
+              //         console.log(`${k}th Confirmation ${tryIx}nd loop error ===> `, ataSwapConfirmation.value.err);
+        
+              //       } else {
+              //         // Success handling with a switch statement
+              //         switch (k % 3) { // Using k % 3 to get index in the current group of 3
+              //           case 0:
+              //             console.log(`Success in swap transaction: https://solscan.io/tx/${sig}`);
+              //             swappedTokenNotify(selectedTokens[Math.floor(k / 3)].id);
+              //             break;
+              //           case 1:
+              //             console.log(`Success in close transaction: https://solscan.io/tx/${sig}`);
+              //             break;
+              //           default:
+              //             console.log(`Success in ata swap transaction: https://solscan.io/tx/${sig}`);
+              //             break;
+              //         }
+              //         break;
+              //       }
+              //     } catch (err) {
+              //       console.log("confirming transaction try: ", tryIx, " ====> ");
+              //       console.log('error trying confirming transaction', err);
+              //     }
+              //   }
+              // } catch (err) {
+              //   console.log(`${k}th Confirmation failed at all`);
+              //   success = false; // Mark success as false
+              //   break; // Exit the inner loop if there's an error
+              // }
+
+              // Confirm the transaction
+              const ataSwapConfirmation = await solConnection.confirmTransaction({
+                signature: sig,
+                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+                blockhash: latestBlockhash.blockhash,
+              });
+
+              // Check for confirmation error
+              if (ataSwapConfirmation.value.err) {
+                console.log(`${k}th Confirmation error ===> `, ataSwapConfirmation.value.err);
+                success = false; // Mark success as false
+                break; // Exit the inner loop if there's an error
+              } else {
+                // Success handling with a switch statement
+                switch (k % 3) { // Using k % 3 to get index in the current group of 3
+                  case 0:
+                    console.log(`Success in swap transaction: https://solscan.io/tx/${sig}`);
+                    swappedTokenNotify(selectedTokens[Math.floor(k / 3)].id);
+                    break;
+                  case 1:
+                    console.log(`Success in close transaction: https://solscan.io/tx/${sig}`);
+                    break;
+                  default:
+                    console.log(`Success in ata swap transaction: https://solscan.io/tx/${sig}`);
+                    break;
+                }
+              }
+            } catch (error) {
+              console.error(`Error occurred during ${k}th transaction processing: `, error);
+              success = false; // Mark success as false
+              break; // Exit the inner loop if an error occurs
+            }
+          }
+
+          // Optional: Log if this batch of transactions was a success or failure
+          if (!success) {
+            console.log(`Batch starting with index ${j} failed.`);
+          } else if ((Math.floor(j / 3) + 1) === selectedTokens.length) {
+            setLoadingText("");
+            setTextLoadingState(false);
+          }
+        })();
+
+        // Add the batch promise to the array
+        promises.push(batchPromise);
+      }
+
+      // Await all batch promises at the end
+      await Promise.all(promises);
+      setLoadingText("");
+      setTextLoadingState(false);
+    } catch (err) {
+      console.log("error during swap and close account ===> ", err);
+      setLoadingText("");
+      setTextLoadingState(false);
+    }
+  }
+
+  useEffect(() => {
+    // 
+  }, [swapTokenList])
 
   useEffect(() => {
     if (selectedTokenList.length === tokenFilterList.length && tokenFilterList.length !== 0) {
@@ -73,6 +329,35 @@ export default function Home() {
     const finalValue = e.target.value; // Capture the final value from the slider
     setCurrentAmount(finalValue); // Update the currentAmount to the final value
   };
+
+  function filterTokenAccounts(accounts: any[], targetMint: string, targetOwner: string): Array<{ pubkey: string; mint: string }> {
+    return accounts
+      .filter(account => {
+        return (
+          account.account.data.parsed.info.mint === targetMint
+        );
+      })
+      .map(account => ({
+        pubkey: account.pubkey,
+        mint: account.account.data.parsed.info.mint
+      }));
+  }
+
+  const swappedTokenNotify = async (mintAddress: string) => {
+    console.log(`token - ${mintAddress} swapped successfully !`)
+    let newFilterList: any[] = [];
+    // let newSwapList: any[] = [];
+    // let newSelectedList: any[] = [];
+    newFilterList = await tokenFilterList.filter((item: { id: string; }) => item.id !== mintAddress)
+    // newSwapList = await tokenFilterList.filter((item: { id: string; }) => item.id !== mintAddress)
+    // newSelectedList = await tokenFilterList.filter((item: { id: string; }) => item.id !== mintAddress)
+    await setTokenFilterList([...newFilterList])
+  }
+
+  type SeletedTokens = {
+    id: string;
+    amount: number
+  }
 
   return (
     <div className="w-full h-full flex flex-row items-center pb-6 relative">
@@ -172,10 +457,10 @@ export default function Home() {
                           Balance
                         </th>
                         <th scope="col" className="px-6 py-3">
-                          Value
+                          Price
                         </th>
                         <th scope="col" className="px-6 py-3">
-                          Approx cunt received
+                          Approx $TOKE received
                         </th>
                       </tr>
                     </thead>
@@ -189,7 +474,7 @@ export default function Home() {
                                 type="checkbox"
                                 className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:focus:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                                 checked={allSelectedFlag === true} // Fully selected state
-                                onChange={() => updateCheckState(tokenFilterList[0].id, currentAmount)}
+                                onChange={() => updateCheckState(tokenFilterList[0].id, tokenFilterList[0].balance)}
                               />
                             </div>
                           </td>
@@ -197,13 +482,13 @@ export default function Home() {
                             {tokenFilterList[0].mintSymbol}
                           </th>
                           <td className="px-6 py-4">
-                            {tokenFilterList[0].balance / 10 ^ tokenFilterList[0].decimal}
+                            {tokenFilterList[0].balance / Math.pow(10, tokenFilterList[0].decimal)} {tokenFilterList[0].mintSymbol}
                           </td>
                           <td className="px-6 py-4">
-                            {tokenFilterList[0].price}
+                            ${(Number(tokenFilterList[0].price)).toFixed(6)}
                           </td>
                           <td className="px-6 py-4">
-                            $ {tokenFilterList[0].balanceByToke / 1000}
+                            {(Number(tokenFilterList[0].balanceByToke / 1000)).toFixed(3)} $TOKE
                           </td>
                         </tr>
                       }
@@ -219,7 +504,7 @@ export default function Home() {
                                     className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:focus:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                                     checked={selectedTokenList.some((token: any) => token.id === item.id)}
                                     onChange={() => {
-                                      updateCheckState(item.id, currentAmount);
+                                      updateCheckState(item.id, item.balance);
                                     }}
                                   />
                                 </div>
@@ -228,13 +513,13 @@ export default function Home() {
                                 {item.mintSymbol}
                               </th>
                               <td className="px-6 py-4">
-                                {item.balance / 10 ^ item.decimal}
+                                {item.balance / Math.pow(10, item.decimal)} {item.mintSymbol}
                               </td>
                               <td className="px-6 py-4">
-                                {item.price}
+                                ${(Number(item.price)).toFixed(6)}
                               </td>
                               <td className="px-6 py-4">
-                                $ {item.balanceByToke / 1000}
+                                {(Number(item.balanceByToke / 1000)).toFixed(3)} $TOKE
                               </td>
                             </tr>
                           )
