@@ -18,6 +18,10 @@ const UserContext = createContext({
   setTextLoadingState: (value: boolean) => { },
   loadingText: "",
   setLoadingText: (value: string) => { },
+  tokeBalance: 0,
+  setTokeBalance: (value: number) => { },
+  swapState: false,
+  setSwapState: (value: boolean) => { },
 })
 
 export default UserContext

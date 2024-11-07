@@ -7,7 +7,7 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "$TOKE SWAP",
-  description: "Solana Web3 Frontend TypeScript for Mini app",
+  description: "Mctoken swap site",
 };
 
 export default function RootLayout({

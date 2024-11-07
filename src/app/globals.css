@@ -111,7 +111,7 @@ body {
 /* Bounce effect */
 .bounce {
   display: inline-block;
-  animation: bounce 4s ease-in-out infinite;
+  animation: bounce 5s ease-in-out infinite;
 }
 
 .bounce-delay-1 {
@@ -276,6 +276,38 @@ body {
 
 .bounce-delay-41 {
   animation-delay: 4.1s;
+}
+
+.bounce-delay-42 {
+  animation-delay: 4.2s;
+}
+
+.bounce-delay-43 {
+  animation-delay: 4.3s;
+}
+
+.bounce-delay-44 {
+  animation-delay: 4.4s;
+}
+
+.bounce-delay-45 {
+  animation-delay: 4.5s;
+}
+
+.bounce-delay-46 {
+  animation-delay: 4.6s;
+}
+
+.bounce-delay-47 {
+  animation-delay: 4.7s;
+}
+
+.bounce-delay-48 {
+  animation-delay: 4.8s;
+}
+
+.bounce-delay-49 {
+  animation-delay: 4.9s;
 }
 
 /* Reflection effect */
